@@ -23,7 +23,7 @@ from copy import copy
 """
 HARDCODED THINGS - FIXME!
 """
-debug = 0                                    # debug mode
+debug = 1                                    # debug mode
 scale = 1.00                                 # scale factor for output
 n_threads = multiprocessing.cpu_count()      # number of threads to use concurrently (default: #cores)
 """
@@ -427,17 +427,19 @@ def polylen(poly,valmin,valmax,granularity=100000,target=-1):
 def findpos(poly,parea,ratio,fr,xmax):
     return polylen(poly,fr,xmax,target=ratio*parea)
 
+
 def process_col(i):
-    global steps,polyl,al,polyu,au,xmin,xmax,ymin,ymax,R2inv,Rinv,Qinv,height,poly_sep,direction,imgl_col
+    global steps,polyl,al,polyu,au,xmin,xmax,ymin,ymax,R2inv,Rinv,Qinv,height,poly_sep,direction,imgl_col,mattrans
     ratio = i*1./(steps-1)
     targetl = findpos(polyl,al,ratio,xmin,xmax)
     targetu = findpos(polyu,au,ratio,xmin,xmax)
     p0 = array([targetl,ymin,polyl(targetl)])
     p1 = array([targetu,ymax,polyu(targetu)])
     points = array([p0,p1])
-    pback = transform_hom(points,R2inv)
-    pback = transform_hom(pback,Rinv)
-    pback = transform_hom(pback,Qinv)
+    #pback = transform_hom(points,R2inv)
+    #pback = transform_hom(pback,Rinv)
+    #pback = transform_hom(pback,Qinv)
+    pback = transform_hom(points,mattrans)
     p0,p1 = pback
     v = p1-p0
     column = zeros((height,1,3))
@@ -448,8 +450,8 @@ def process_col(i):
     return column
 
 def init_worker(args):
-    global steps,polyl,al,polyu,au,xmin,xmax,ymin,ymax,R2inv,Rinv,Qinv,height,poly_sep,direction,imgl_col
-    steps,polyl,al,polyu,au,xmin,xmax,ymin,ymax,R2inv,Rinv,Qinv,height,poly_sep,direction,imgl_col = args
+    global steps,polyl,al,polyu,au,xmin,xmax,ymin,ymax,R2inv,Rinv,Qinv,height,poly_sep,direction,imgl_col,mattrans
+    steps,polyl,al,polyu,au,xmin,xmax,ymin,ymax,R2inv,Rinv,Qinv,height,poly_sep,direction,imgl_col,mattrans = args
 
 def dewarp_page(points,outpath,poly_sep,direction,no_run,area_sep,maxratio=2.5,thresh=0.85,n_outer=75,degree=2):
     def best(q):
@@ -520,6 +522,7 @@ def dewarp_page(points,outpath,poly_sep,direction,no_run,area_sep,maxratio=2.5,t
     R2inv = inv(R2)
     p3d_book2 = transform_hom(p3d_book,R2)
     line0_2 = transform_hom(line0,R2)
+    mattrans = dot(dot(R2inv,Rinv),Qinv)
 
     # handle outer slices more robustly by fitting a plane and only fit higher order poly to dense regions
     xs = p3d_book2[:,0]
@@ -640,7 +643,7 @@ def dewarp_page(points,outpath,poly_sep,direction,no_run,area_sep,maxratio=2.5,t
     steps = steps_full
 
     pool = multiprocessing.Pool(processes=n_threads,initializer=init_worker( \
-        (steps,polyl,al,polyu,au,xmin,xmax,ymin,ymax,R2inv,Rinv,Qinv,height,poly_sep,direction,imgl_col)))
+        (steps,polyl,al,polyu,au,xmin,xmax,ymin,ymax,R2inv,Rinv,Qinv,height,poly_sep,direction,imgl_col,mattrans)))
     columns = pool.map(process_col,range(steps))
     for i in range(len(columns)):
         dewarped[:,i,:] = columns[i][:,0,:]
@@ -679,6 +682,8 @@ def dewarp_page(points,outpath,poly_sep,direction,no_run,area_sep,maxratio=2.5,t
         dewarped = fliplr(dewarped)
     if topleft[1]>bottomleft[1]:
         dewarped = flipud(dewarped)
+
+    imsave("testout.png",dewarped)
 
     # crop
     gimg = mean(dewarped,axis=2)
