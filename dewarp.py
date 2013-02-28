@@ -188,24 +188,11 @@ def match(x):
     matches = __ransac(fl,fr,matches)
     return matches
 
-def reconstruct3d(imgl_path,imgr_path,imgl,imgr):
-    # sift takes quite a bit of memory, ensure we have at least 8GB to run in parallel
-    freeram = int(os.popen("free -m").readlines()[1].split()[1])
-    if freeram>8000:
-        nproc = 2
-    else:
-        nproc = 1
-    pool = multiprocessing.Pool(processes=nproc)
-    res_l = pool.apply_async(sift,(imgl_path,imgl))
-    res_r = pool.apply_async(sift,(imgr_path,imgr))
-    pool.close()
-    pool.join()
-    fl,dl = res_l.get()
-    fr,dr = res_r.get()
+def reconstruct3d(fl,dl,fr,dr):
     pool = multiprocessing.Pool(processes=n_threads)
     matches = pool.map(match,[(fl,dl,fr,dr) for i in range(n_threads)])
     matches.sort(key=lambda x:len(x),reverse=1)
-    return fl,fr,matches[0]
+    return matches[0]
 
 def pagesep(img,maxdist=5,r=sepcol_r,g=sepcol_g,b=sepcol_b):
     def find_col(img,col,thresh=0.25):
@@ -743,6 +730,20 @@ imgr *= 255.
 # fix output height to image height and derive width based on shape later on
 height = int(floor(imgl.shape[0]*scale))
 
+imgl_gray = mean(imgl,axis=2)
+imgr_gray = mean(imgr,axis=2)
+
+# start sift matching asynchronously to save time
+freeram = int(os.popen("free -m").readlines()[1].split()[1])
+if freeram>8000:
+    nproc = 2
+else:
+    nproc = 1
+pool = multiprocessing.Pool(processes=nproc)
+res_l = pool.apply_async(sift,(sys.argv[2],imgl_gray))
+res_r = pool.apply_async(sift,(sys.argv[3],imgr_gray))
+pool.close()
+
 print "Removing background..."
 bgcol = array([bgcol_r,bgcol_g,bgcol_b])
 imgl = remove_bg(imgl,bgcol)
@@ -755,8 +756,6 @@ print "Detecting page separator..."
 l0top,l0bottom,poly_l,poly_r,area_sep = pagesep_3d(imgl,imgr)
 
 imgl_col = imgl.copy()
-imgl = mean(imgl,axis=2)
-imgr = mean(imgr,axis=2)
 
 if debug:
     tmpleft = sys.argv[4]+"/dewarped-left.png"
@@ -769,11 +768,16 @@ else:
         tmpleft = os.tmpnam()+".png"
         tmpright = os.tmpnam()+".png"
 
+# fetch sift results
+pool.join()
+fl,dl = res_l.get()
+fr,dr = res_r.get()
+
 run = 0
 dewarped_left,dewarped_right = 0,0
 while dewarped_left==0 or dewarped_right==0:
     print "Performing stereo matching..."
-    fl,fr,matches = reconstruct3d(sys.argv[2],sys.argv[3],imgl,imgr)
+    matches = reconstruct3d(fl,dl,fr,dr)
 
     print "Determining disparities of feature matches..."
     pdisp = zeros((len(matches),3))
